@@ -1,0 +1,109 @@
+#!/usr/bin/env bash
+# Name:
+# By Robbert Gurdeep Singh
+################################################################################
+
+if [ \! -f "$1" ]; then
+    echo "provide a file"
+    exit 1
+fi
+uuid=$(uuidgen)
+safeName=$(basename "$1" | sed 's/\.[^.]*$//' | jq -R '"\(.)"')
+
+HOST="remarkable"
+if ! ssh -o ConnectTimeout=1 $HOST true; then
+    echo "could not connect over cable"
+    HOST="remarkableWifi"
+
+    if ! ssh -o ConnectTimeout=1 $HOST true; then
+        echo "could not connect over Wifi"
+        exit 1
+    fi
+fi
+set -e
+
+maybeEpub=""
+extention="pdf"
+theFile="$1"
+if [ "${theFile##*.}" = "md" ]; then
+    tmpfile="$(mktemp --suffix='.epub' --tmpdir)"
+    tmpfile2="$(mktemp --suffix='.css' --tmpdir)"
+    trap "rm '$tmpfile' '$tmpfile2'" EXIT
+
+    cat <<HERE >"$tmpfile2"
+body { margin: 10%; text-align: justify; font-size: small; }
+p { margin-bottom: 1em; } /* remove the space between line breaks */
+hr { visibility: hidden; } /*hide hr tags so they can be used as section breaks within a chapter */
+HERE
+    echo $tmpfile2
+    cat $tmpfile2
+
+    maybeEpub="epub"
+    extention="epub"
+    pandoc -f gfm -t epub2 \
+        --metadata coverpage=false \
+        --metadata title="$(basename $1)" \
+        --css="$(realpath $tmpfile2)" -o $tmpfile $theFile
+    theFile=$tmpfile
+fi
+
+loc=/home/root/.local/share/remarkable/xochitl/$uuid
+
+echo "clear cache"
+ssh $HOST "rm -f $loc.{cache,thumbnails,textconversion}/*"
+ssh $HOST "rm -rf $loc.{textconversion,content,pagedata,highlights}"
+ssh $HOST "rm -rf $loc.pdf"
+ssh $HOST "rm -rf $loc.epub"
+ssh $HOST "touch $loc.pagedata"
+
+echo "push file"
+cat "$theFile" | ssh $HOST "cat > '$loc.$extention'"
+
+echo "update metadata"
+ssh $HOST "cat > $loc.metadata" <<HERE
+{
+    "deleted": false,
+    "lastModified": "$(date +%s)337",
+    "metadatamodified": true,
+    "modified": true,
+    "parent": "",
+    "pinned": true,
+    "synced": false,
+    "type": "DocumentType",
+    "version": 1,
+    "visibleName": $safeName
+}
+HERE
+ssh $HOST "cat > $loc.content" <<HERE
+{
+    "dummyDocument": false,
+    "extraMetadata": {
+    },
+    "fileType": "$maybeEpub",
+    "fontName": "",
+    "lastOpenedPage": 0,
+    "legacyEpub": false,
+    "lineHeight": -1,
+    "margins": 100,
+    "orientation": "portrait",
+    "pageCount": 0,
+    "textScale": 1,
+    "transform": {
+        "m11": 1,
+        "m12": 0,
+        "m13": 0,
+        "m21": 0,
+        "m22": 1,
+        "m23": 0,
+        "m31": 0,
+        "m32": 0,
+        "m33": 1
+    }
+}
+HERE
+
+# Restart the UI
+ssh $HOST "systemctl reset-failed xochitl.service && systemctl restart xochitl.service"
+
+echo "You can now open $safeName"
+echo $uuid
