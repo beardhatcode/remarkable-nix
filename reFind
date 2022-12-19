@@ -1,6 +1,6 @@
 #! /bin/sh
 # needs nix-shell -i sh -p fzf jq
-ssh ${REMARKABLE_LOC:-remarkable} \
+ssh ${REMARKABLE_LOC:-root@10.11.99.1} \
     "cd ~/.local/share/remarkable/xochitl/;echo '{\"...\":false'; cd ~/.local/share/remarkable/xochitl/; head -n500 *.metadata | sed '/^==>/{s/==> /,\"/;s/.metadata <==/\":/}'; echo '}'" |
     jq -r 'to_entries | map(select(.value?.deleted? == false)) | map({key:.key,name:(.value.visibleName?),mod:(.value.lastModified | tonumber  | . / 1000 |  localtime | "\(.[0])-\("00\(.[1]+1)"[-2:])-\("00\(.[2])"[-2:]) \("00\(.[3])"[-2:]):\("00\(.[4])"[-2:])" )}) | sort_by(.mod) | map([.mod,.name,.key]|join("\t"))|join("\n") '  |
     fzf --with-nth=1,2 -n1,2 -d'\t' |

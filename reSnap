@@ -40,7 +40,7 @@ function usage() {
 }
 
 # default ssh address
-ADDRESS=${REMARKABLE_LOC:-remarkable}
+ADDRESS=${REMARKABLE_LOC:-root@10.11.99.1}
 
 # default output file
 OUTPUT="$(date +/tmp/remarkable-%Y%m%d-%H%M%S.png)"

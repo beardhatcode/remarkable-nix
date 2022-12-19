@@ -2,15 +2,17 @@
 # Name:
 # By Robbert Gurdeep Singh
 ################################################################################
-
-if [ \! -f "$1" ]; then
-    echo "provide a file"
-    exit 1
+if [ "$#" -eq 2 ]; then
+    if [ "$1" = "get" ]; then
+        wget "http://10.11.99.1/download/e9eddcdd-6856-4978-abd3-166768fdb9ba/placeholder" -O "$2"
+        exit 0
+    fi
 fi
-uuid=$(uuidgen)
-safeName=$(basename "$1" | sed 's/\.[^.]*$//' | jq -R '"\(.)"')
+if [ "$#" -ne "1" ]; then
+    exit 2
+fi
 
-HOST=${REMARKABLE_LOC:-root@10.11.99.1}
+HOST="remarkable"
 if ! ssh -o ConnectTimeout=1 $HOST true; then
     echo "could not connect over cable"
     HOST="remarkableWifi"
@@ -20,20 +22,62 @@ if ! ssh -o ConnectTimeout=1 $HOST true; then
         exit 1
     fi
 fi
-set -e
+
+theFile="$1"
+
+if [ ! -f "$theFile" ]; then
+    echo "clould not find file locally"
+    if echo "$theFile" | grep --silent '^https\?://.*pdf'; then
+        if wget -O /tmp/re-tmp-downloaded.pdf "$theFile"; then
+            theFile="/tmp/re-tmp-downloaded.pdf"
+        else
+            echo "cloud not download file"
+            exit 1
+        fi
+    else
+        echo "could not find file"
+        exit 1
+    fi
+fi
+
+safeName=$(basename "$theFile" | sed 's/\.[^.]*$//' | jq -R '"\(.) [TMP \(now | strflocaltime("%Y-%m-%d %H:%M:%S"))]"')
 
 maybeEpub=""
 extention="pdf"
-theFile="$1"
 if [ "${theFile##*.}" = "md" ]; then
     tmpfile="$(mktemp --suffix='.epub' --tmpdir)"
     tmpfile2="$(mktemp --suffix='.css' --tmpdir)"
     trap "rm '$tmpfile' '$tmpfile2'" EXIT
 
     cat <<HERE >"$tmpfile2"
-body { margin: 10%; text-align: justify; font-size: small; }
 p { margin-bottom: 1em; } /* remove the space between line breaks */
 hr { visibility: hidden; } /*hide hr tags so they can be used as section breaks within a chapter */
+body { margin: 5%; text-align: justify; font-size: medium; }
+code { font-family: monospace; line-height: 1em; }
+pre { font-family: monospace; line-height: 1em; }
+h1 { text-align: left; }
+h2 { text-align: left; }
+h3 { text-align: left; }
+h4 { text-align: left; }
+h5 { text-align: left; }
+h6 { text-align: left; }
+/* For title, author, and date on the cover page */
+h1.title { }
+p.author { }
+p.date { }
+nav#toc ol,
+nav#landmarks ol { padding: 0; margin-left: 1em; }
+nav#toc ol li,
+nav#landmarks ol li { list-style-type: none; margin: 0; padding: 0; }
+a.footnote-ref { vertical-align: super; }
+em, em em em, em em em em em { font-style: italic;}
+em em, em em em em { font-style: normal; }
+code{ white-space: pre-wrap; }
+span.smallcaps{ font-variant: small-caps; }
+span.underline{ text-decoration: underline; }
+q { quotes: "“" "”" "‘" "’"; }
+div.column{ display: inline-block; vertical-align: top; width: 50%; }
+div.hanging-indent{margin-left: 1.5em; text-indent: -1.5em;}
 HERE
     echo $tmpfile2
     cat $tmpfile2
@@ -41,13 +85,14 @@ HERE
     maybeEpub="epub"
     extention="epub"
     pandoc -f gfm -t epub2 \
+        --no-highlight \
         --metadata coverpage=false \
-        --metadata title="$(basename $1)" \
+        --metadata title="$(basename $theFile)" \
         --css="$(realpath $tmpfile2)" -o $tmpfile $theFile
     theFile=$tmpfile
 fi
 
-loc=/home/root/.local/share/remarkable/xochitl/$uuid
+loc=/home/root/.local/share/remarkable/xochitl/e9eddcdd-6856-4978-abd3-166768fdb9ba
 
 echo "clear cache"
 ssh $HOST "rm -f $loc.{cache,thumbnails,textconversion}/*"
@@ -57,7 +102,7 @@ ssh $HOST "rm -rf $loc.epub"
 ssh $HOST "touch $loc.pagedata"
 
 echo "push file"
-cat "$theFile" | ssh $HOST "cat > '$loc.$extention'"
+scp "$theFile" $HOST:"$loc.$extention"
 
 echo "update metadata"
 ssh $HOST "cat > $loc.metadata" <<HERE
@@ -78,6 +123,10 @@ ssh $HOST "cat > $loc.content" <<HERE
 {
     "dummyDocument": false,
     "extraMetadata": {
+        "LastTool": "Ballpointv2",
+        "LastPen": "Ballpointv2",
+        "LastBallpointv2Color": "Black",
+        "LastBallpointv2Size": "2"
     },
     "fileType": "$maybeEpub",
     "fontName": "",
@@ -106,4 +155,4 @@ HERE
 ssh $HOST "systemctl reset-failed xochitl.service && systemctl restart xochitl.service"
 
 echo "You can now open $safeName"
-echo $uuid
+
